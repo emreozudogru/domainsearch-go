@@ -1,4 +1,4 @@
-package domainsearch_go
+package main
 
 import (
 	"bufio"
