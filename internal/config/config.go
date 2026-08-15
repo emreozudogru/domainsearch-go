@@ -17,7 +17,10 @@ type Config struct {
 	CacheTTL      time.Duration // cache entry freshness window
 	Retries       int           // lookup retries on timeout
 	Timeout       time.Duration // per-lookup timeout
-	AvailableOnly bool          // only emit available domains to output
+	AvailableOnly bool          // only emit available domains
+	Charset       string        // charset preset or literal alphabet (empty = use wordlist)
+	MinLen        int           // shortest label to generate in charset mode
+	MaxLen        int           // longest label to generate in charset mode
 }
 
 // Validate applies defaults and basic validation to the Config.
@@ -39,5 +42,11 @@ func (c *Config) Validate() {
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = 15 * time.Second
+	}
+	if c.MinLen < 1 {
+		c.MinLen = 1
+	}
+	if c.MaxLen < c.MinLen {
+		c.MaxLen = c.MinLen
 	}
 }

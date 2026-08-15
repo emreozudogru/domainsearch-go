@@ -46,6 +46,9 @@ concurrently with an optional rate limit.`,
 	flags.IntVar(&cfg.Retries, "retries", 2, "number of retries on a lookup timeout")
 	flags.DurationVar(&cfg.Timeout, "timeout", 15*time.Second, "per-lookup timeout")
 	flags.BoolVarP(&cfg.AvailableOnly, "available-only", "a", false, "only write available domains to output")
+	flags.StringVarP(&cfg.Charset, "charset", "c", "", "brute-force mode: charset preset (letters|digits|lettersdigits|symbols|all) or a literal alphabet string")
+	flags.IntVar(&cfg.MinLen, "min", 1, "shortest label to generate in brute-force mode")
+	flags.IntVar(&cfg.MaxLen, "max", 1, "longest label to generate in brute-force mode")
 	return cmd
 }
 

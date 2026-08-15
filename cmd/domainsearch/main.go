@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"ds_go/internal/checker"
 	"ds_go/internal/config"
 	"ds_go/internal/output"
+	"ds_go/internal/provider"
 	"ds_go/internal/worker"
 )
 
@@ -44,18 +44,31 @@ func run(cfg *config.Config) error {
 		"tlds", cfg.Tlds,
 		"workers", cfg.Workers,
 		"rate", cfg.Rate,
-		"format", cfg.Format,
+		"fmt", cfg.Format,
+		"charset", cfg.Charset,
 		"cache", cfg.CachePath,
 		"timeout", cfg.Timeout,
 		"retries", cfg.Retries,
 	)
 
-	words, err := readWordlist(cfg.InputPath)
-	if err != nil {
-		return fmt.Errorf("read wordlist %q: %w", cfg.InputPath, err)
-	}
-	if len(words) == 0 {
-		return fmt.Errorf("wordlist %q is empty", cfg.InputPath)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// The lookup dependency writes diagnostic messages directly to os.Stderr.
+	// Capture them into the logger (silenced unless verbose) so our own stderr
+	// output (progress + summary) stays clean. Our own writers use the saved
+	// realStderr.
+	realStderr, restoreStderr := captureLibraryStderr()
+	defer restoreStderr()
+
+	// Choose the label source: a wordlist file, or a charset generator.
+	var src provider.Source = provider.Wordlist{Path: cfg.InputPath}
+	if cfg.Charset != "" {
+		src = provider.Charset{
+			Alphabet: provider.ParseAlphabet(cfg.Charset),
+			MinLen:   cfg.MinLen,
+			MaxLen:   cfg.MaxLen,
+		}
 	}
 
 	out, cleanup, err := buildWriter(cfg)
@@ -77,7 +90,7 @@ func run(cfg *config.Config) error {
 		}
 	}
 
-	// Build the lookup checker with timeout and retries.
+	// Build the lookup checker with timeout and retry.
 	ch := checker.NewChecker(cfg.Timeout, cfg.Retries, checker.DefaultLookup)
 	check := checker.CheckFunc(ch.Check)
 	if store != nil {
@@ -89,23 +102,25 @@ func run(cfg *config.Config) error {
 	results := make(chan checker.Result, bufSize)
 	p := worker.New(jobs, results, cfg.Workers, cfg.Rate, check)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	stream, totalLabels, err := src.Open(ctx)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	totalChecks := totalLabels * len(cfg.Tlds)
 
 	var bar *progressbar.ProgressBar
-	if !cfg.NoProgress {
-		total := len(words) * len(cfg.Tlds)
-		bar = progressbar.NewOptions(total,
-			progressbar.OptionSetWriter(os.Stderr),
+	if !cfg.NoProgress && totalChecks > 0 {
+		bar = progressbar.NewOptions(totalChecks,
+			progressbar.OptionSetWriter(realStderr),
 			progressbar.OptionSetDescription("Checking domains"),
 			progressbar.OptionSetWidth(20),
 		)
 	}
 
-	// Feeder: push words into the jobs channel.
+	// Feeder: push labels into the jobs channel.
 	go func() {
 		defer close(jobs)
-		for _, w := range words {
+		for w := range stream {
 			select {
 			case <-ctx.Done():
 				return
@@ -115,20 +130,18 @@ func run(cfg *config.Config) error {
 	}()
 
 	// Consumer: drain results into the output writer.
-	var stats stats
+	var st stats
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for res := range results {
-			stats.record(res)
-			// available-only filter: skip emitting taken/error results.
+			st.record(res)
+			// available-only filter: skip taken/error results from output.
 			if !(cfg.AvailableOnly && !res.Available) {
 				_ = out.Write(res)
 			}
-			if cfg.Verbose {
-				slog.Debug("checked", "domain", res.Domain, "available", res.Available, "err", res.Err)
-			}
+			slog.Debug("checked", "domain", res.Domain, "available", res.Available, "err", res.Err)
 			if bar != nil {
 				_ = bar.Add(1)
 			}
@@ -147,17 +160,14 @@ func run(cfg *config.Config) error {
 	}
 
 	elapsed := time.Since(start)
-	slog.Debug("done", "elapsed", elapsed, "checked", stats.checked, "available", stats.available)
-	printSummary(stats, elapsed)
+	slog.Debug("done", "elapsed", elapsed, "checked", st.checked, "available", st.available)
+	printSummary(realStderr, st, elapsed, totalChecks)
 	return nil
 }
 
 // stats tracks per-run counters.
 type stats struct {
-	checked   int64
-	available int64
-	taken     int64
-	failed    int64
+	checked, available, taken, failed int64
 }
 
 func (s *stats) record(r checker.Result) {
@@ -173,35 +183,37 @@ func (s *stats) record(r checker.Result) {
 	}
 }
 
-// printSummary writes the run summary to stderr.
-func printSummary(s stats, elapsed time.Duration) {
-	fmt.Fprintf(os.Stderr,
-		"\nSummary: checked=%d  available=%d  taken=%d  errors=%d  in %s\n",
-		s.checked, s.available, s.taken, s.failed, elapsed.Round(time.Millisecond),
+// printSummary writes the run summary to w (stderr).
+func printSummary(w io.Writer, s stats, elapsed time.Duration, total int) {
+	fmt.Fprintf(w,
+		"\nSummary: checked=%d/%d  available=%d  taken=%d  errors=%d  in %s\n",
+		s.checked, total, s.available, s.taken, s.failed, elapsed.Round(time.Millisecond),
 	)
 }
 
-// readWordlist reads non-empty, trimmed lines from path.
-func readWordlist(path string) ([]string, error) {
-	f, err := os.Open(path)
+// captureLibraryStderr redirects writes to os.Stderr (used directly by the whois
+// lookup dependency) into the logger, and returns the original stderr for our
+// own progress/summary output. The restore func puts os.Stderr back and stops
+// the drain goroutine.
+func captureLibraryStderr() (realStderr *os.File, restore func()) {
+	realStderr = os.Stderr
+	pr, pw, err := os.Pipe()
 	if err != nil {
-		return nil, err
+		return realStderr, func() {}
 	}
-	defer f.Close()
-
-	var words []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+	os.Stderr = pw
+	go func() {
+		sc := bufio.NewScanner(pr)
+		for sc.Scan() {
+			slog.Warn(sc.Text())
 		}
-		words = append(words, line)
+	}()
+	restore = func() {
+		_ = pw.Close()
+		os.Stderr = realStderr
+		_ = pr.Close()
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return words, nil
+	return realStderr, restore
 }
 
 // buildWriter constructs the output Writer based on config.

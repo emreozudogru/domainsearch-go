@@ -8,6 +8,9 @@ whether each resulting domain is available for registration.
 ## Features
 
 - Reads wordlist entries from a text file (one word per line).
+- **Brute-force mode**: optionally generate label candidates from character
+  sets (English letters, digits, symbols) instead of a wordlist — e.g. `a`,
+  `b`, `0`, `aa`, `ab` — without requiring a wordlist file.
 - Checks **multiple configurable TLDs** per word (e.g. `.us`, `.com`, `.net`).
 - Runs checks **concurrently** with a configurable worker pool.
 - **Rate-limited** to avoid overwhelming the lookup service.
@@ -68,6 +71,9 @@ print results to stdout.
 | `--timeout`             | `15s`                | Per-lookup timeout.                                         |
 | `--retries`             | `2`                  | Number of retries on a lookup timeout.                      |
 | `-a, --available-only`  | `false`              | Only write available domains to output.                     |
+| `-c, --charset`         | (none)               | Brute-force mode: charset preset (`letters`, `digits`, `lettersdigits`, `symbols`, `all`) or a literal alphabet (e.g. `ab0-`). Skips the wordlist. |
+| `--min`                 | `1`                  | Shortest label length to generate in brute-force mode.      |
+| `--max`                 | `1`                  | Longest label length to generate in brute-force mode.       |
 
 ### Examples
 
@@ -96,6 +102,25 @@ Only list available domains (to a file, with a 20-second per-lookup timeout and
 ```bash
 ./bin/domainsearch -t .us,.com,.net -a -f text -o available.txt --timeout 20s --retries 2
 ```
+
+**Brute-force (no wordlist)** — generate every single-character label from English
+letters, digits, and symbols, appended with each TLD. Use presets (`letters`,
+`digits`, `lettersdigits`, `symbols`, `all`) or a literal alphabet:
+
+```bash
+# a-z, 0-9, and the symbols - _ , each checked against .us
+./bin/domainsearch -c all -t .us -w 5 -r 10 --no-progress
+
+# only single English lowercase letters a-z
+./bin/domainsearch -c letters -t .us,.com,net
+
+# two-character combinations from a custom alphabet
+./bin/domainsearch -c abcde --min 2 --max 2 -t .us --no-progress
+```
+
+> The combination space grows as `len(alphabet)^max`. Start small (`--min` and
+> `--max` at 1 or 2) and keep `--rate`/`--workers` modest. Only ASCII labels are
+> generated — internationalized domain names are not produced.
 
 **Caching and resume** — persist results to a file so re-runs skip already-checked
 domains (great for long wordlists interrupted mid-run):
@@ -148,9 +173,11 @@ domainsearch-go/
 │   └── domainsearch/
 │       └── main.go            # Entry point + cobra CLI
 ├── internal/
+│   ├── cache/                 # JSONL result cache with TTL + resume
 │   ├── checker/               # Domain availability lookup (wraps haccer/available)
 │   ├── config/                # cobra CLI flags + Config struct + validation
 │   ├── output/                # Text/JSON/CSV result writers
+│   ├── provider/              # Wordlist + charset (brute-force) label sources
 │   └── worker/                # Concurrent worker pool + rate limiter
 └── scripts/
     └── build.sh               # Convenience build script → bin/domainsearch
@@ -171,6 +198,9 @@ domainsearch-go/
   errors are reported per domain but not retried (only timeouts are retried).
 - The cache is a local file; it is not shared across machines.
 - Very large wordlists with many TLDs can still take a long time due to network latency.
+- Brute-force mode only enumerates ASCII labels (letters, digits, symbols); it does not
+  generate internationalized domain names (IDN), and the combination space grows
+  exponentially — keep `--min`/`--max` small.
 
 ## Development
 
