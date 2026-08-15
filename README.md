@@ -1,20 +1,24 @@
 # domainsearch-go
 
-A simple Go command-line tool that checks the availability of domain names by reading a
-wordlist file and appending a top-level domain (TLD) to each entry. It uses the
-[`github.com/haccer/available`](https://github.com/haccer/available) package to query
+A Go command-line tool that checks the availability of domain names by reading a wordlist
+file and appending one or more top-level domains (TLDs) to each entry. It uses the
+[`github.com/haccer/available`](https://github.com/haccer/available) package to determine
 whether each resulting domain is available for registration.
 
 ## Features
 
 - Reads wordlist entries from a text file (one word per line).
-- Appends a configurable TLD to each word.
-- Checks each domain for availability via the `available` package.
-- Prints status for each domain to standard output.
+- Checks **multiple configurable TLDs** per word (e.g. `.us`, `.com`, `.net`).
+- Runs checks **concurrently** with a configurable worker pool.
+- **Rate-limited** to avoid overwhelming the lookup service.
+- Reports **live progress** on stderr (available count, items checked).
+- Supports **structured output formats**: plain text, JSON, and CSV.
+- Writes results to a file or to stdout.
+- Handles `SIGINT`/`SIGTERM` gracefully — cancels in-flight checks.
 
 ## Requirements
 
-- [Go](https://go.dev/) 1.21 or later (any recent version works).
+- [Go](https://go.dev/) 1.21 or later.
 
 ## Installation
 
@@ -25,96 +29,145 @@ whether each resulting domain is available for registration.
    cd domainsearch-go
    ```
 
-2. Download dependencies:
+2. Download dependencies and build:
 
    ```bash
    go mod tidy
+   go build -o bin/domainsearch ./cmd/domainsearch
    ```
 
-3. Build the binary:
+   Or use the provided build script:
 
    ```bash
-   go build -o ds_go
+   ./scripts/build.sh
    ```
 
 ## Usage
 
-The program reads words from `wtzl.txt` (located in the working directory) and appends the
-hardcoded TLD `.us` to each word. It then checks and prints the availability for every
-generated domain.
+```bash
+./bin/domainsearch [flags]
+```
+
+All flags are optional. Defaults read from `assets/wtzl.txt`, check `.us` domains, and
+print results to stdout.
+
+### Flags
+
+| Flag          | Default              | Description                                                |
+|---------------|----------------------|------------------------------------------------------------|
+| `--input`     | `assets/wtzl.txt`    | Path to the wordlist file (one word per line).             |
+| `--tlds`      | `.us`                | Comma-separated list of TLDs, e.g. `.us,.com,.net`.       |
+| `--format`    | `text`               | Output format: `text`, `json`, or `csv`.                   |
+| `--output`    | (stdout)             | Output file path. If empty, writes to stdout.            |
+| `--rate`      | `5`                  | Maximum domain checks per second (rate limit).             |
+| `--workers`   | `10`                 | Number of concurrent worker goroutines.                    |
+| `--no-progress` | `false`            | Disable the progress indicator on stderr.                  |
+
+### Examples
+
+Check `.us` and `.com` for every word, print text results to stdout (with live progress
+on stderr):
 
 ```bash
-./ds_go
+./bin/domainsearch --tlds .us,.com
 ```
 
-Expected output (per domain):
+Save JSON results to a file, no progress bar:
 
+```bash
+./bin/domainsearch --tlds .us,.com,.net --format json --output results.json --no-progress
 ```
-example.us looking...
-example.us is EMPTY
+
+Save CSV results with higher concurrency and a tighter rate limit:
+
+```bash
+./bin/domainsearch --tlds .com --format csv --output results.csv --workers 20 --rate 10
 ```
+
+### Output Formats
+
+- **text** — one line per domain: `domain\tSTATUS` (or `domain (error: ...)`).
+- **json** — a streaming JSON array of objects
+  `{"domain","tld","available","error"}`.
+- **csv** — a header row followed by `domain,tld,available,error`.
 
 ### Wordlist Format
 
-The wordlist (`wtzl.txt`) is a text file with one word per line. Each line is read
-sequentially. Blank lines are included as-is. To customize the list, replace the contents of
-`wtzl.txt` or modify the path in `ds_go.go`.
-
-### Changing the TLD
-
-The TLD is configured in `ds_go.go`:
-
-```go
-ext := []string{".us"}
-```
-
-To check multiple TLDs, extend the slice:
-
-```go
-ext := []string{".us", ".com", ".net"}
-```
-
-Then rebuild:
-
-```bash
-go build -o ds_go
-```
+The wordlist is a text file with one word per line. Blank lines are skipped. Replace the
+contents of `assets/wtzl.txt` or pass your own path with `--input`.
 
 ## Project Structure
 
-| File       | Description                                              |
-|------------|----------------------------------------------------------|
-| `ds_go.go` | Main program: reads wordlist, checks domain availability. |
-| `wtzl.txt` | Wordlist file (one word per line).                       |
-| `go.mod`   | Go module definition.                                    |
-| `go.sum`   | Dependency checksums.                                    |
-| `AGENTS.md`| Guidelines for automated agents operating in this repo.   |
-| `LICENSE`  | GNU General Public License v3.0.                         |
+```
+domainsearch-go/
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # CI: build, vet, test, lint
+├── AGENTS.md                  # Guidelines for automated agents
+├── Makefile                   # Common dev targets (build, test, lint, …)
+├── README.md                  # This file
+├── LICENSE                    # GNU GPL v3
+├── go.mod                     # Go module definition
+├── go.sum                     # Dependency checksums
+├── .gitignore                 # Ignores /bin/, binaries, etc.
+├── .golangci.yml              # golangci-lint configuration
+├── assets/
+│   └── wtzl.txt               # Bundled wordlist (one word per line)
+├── bin/                       # Build output (gitignored)
+├── cmd/
+│   └── domainsearch/
+│       └── main.go            # Entry point + cobra CLI
+├── internal/
+│   ├── checker/               # Domain availability lookup (wraps haccer/available)
+│   ├── config/                # cobra CLI flags + Config struct + validation
+│   ├── output/                # Text/JSON/CSV result writers
+│   └── worker/                # Concurrent worker pool + rate limiter
+└── scripts/
+    └── build.sh               # Convenience build script → bin/domainsearch
+```
 
 ## Dependencies
 
-- [`github.com/haccer/available`](https://github.com/haccer/available) — checks domain
-  availability.
+- [`github.com/haccer/available`](https://github.com/haccer/available) — domain availability
+  lookups.
+- [`golang.org/x/time/rate`](https://pkg.go.dev/golang.org/x/time/rate) — rate limiting.
+- [`github.com/spf13/cobra`](https://github.com/spf13/cobra) +
+  [`spf13/pflag`](https://github.com/spf13/pflag) — command-line interface.
+- [`github.com/schollz/progressbar/v3`](https://github.com/schollz/progressbar) — progress bar.
 
 ## Known Limitations
 
-- Only one hardcoded TLD is used by default.
-- Domain checks run sequentially (no concurrency).
-- No rate limiting on external lookups.
-- No structured output format (JSON, CSV, or file output).
-- File path and options are hardcoded; no CLI flags.
+- Lookups rely on the `available` package's own logic; errors are reported per domain but
+  not retried.
+- No persistence of "already checked" domains across runs.
 
 ## Development
 
 Contributions are welcome. To develop locally:
 
 1. Fork and clone the repository.
-2. Build with `go build`.
-3. Run with `./ds_go`.
-4. After making changes, build and verify the output.
+2. Install dependencies and build:
+   ```bash
+   go mod tidy
+   make build      # or: go build ./cmd/domainsearch
+   ```
+3. Run unit tests and checks:
+   ```bash
+   make test       # go test ./...
+   make vet        # go vet ./...
+   make fmt        # gofmt -l . && go mod tidy
+   make lint       # golangci-lint run
+   ```
+4. Run the tool:
+   ```bash
+   make run
+   ```
 
-Follow the commit conventions described in [AGENTS.md](AGENTS.md). Commit directly to
-`master` (no feature branches) and push after each task.
+Continuous integration (`.github/workflows/ci.yml`) runs the build, vet, test, and lint
+steps on every push and pull request.
+
+Follow the commit conventions described in [AGENTS.md](AGENTS.md). Commit directly to `master`
+(no feature branches) and push after each task.
 
 ## License
 

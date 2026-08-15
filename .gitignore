@@ -1,3 +1,4 @@
-# Build output
-ds_go
+# Build artifacts
+/bin/
 *.exe
+ds_go

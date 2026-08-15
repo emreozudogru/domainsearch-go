@@ -1,0 +1,19 @@
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - gocritic
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+run:
+  timeout: 5m

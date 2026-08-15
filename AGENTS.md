@@ -45,3 +45,9 @@ should:
 - Build the code and run tests before committing.
 - Avoid destructive operations such as `git reset --hard` or deleting files.
 - Commit directly to `master` / `main` — no feature branches.
+
+## 5. Documentation
+- After changing code, update the relevant documentation (README, inline
+  comments, usage examples) to keep it accurate. Do not leave docs stale.
+- When adding a new feature, flag or CLI option, document it in the README.
+- When removing a feature or file, remove its references from the docs too.
