@@ -1,39 +1,40 @@
 # AGENTS.md
 
-Repo için otomatik çalışan ajanlar için yönergeler.
+Bu repo için otomatik çalışan ajanların (LLM) izlemesi gereken görev ve durum kuralları.
+**Ajan komutu kendisi karar vermeli.** Aşağıdaki noktalardaki *ne yapılmalı* kısımları göz önünde
+bulundurur, fakat tam olarak hangi shell komutları ve sırayla çalıştırılacağı tam anlamlı bir
+görevin çözümleyicisi (LLM) tarafından bu adımların uygun sırası ve biçimde yorumlanır.
 
-## Başlangıçta Git Senkronizasyonu
-Her ajan, **ilk çalıştığında** şu adımları izler:
+## 1. Başlangıçta Git Senkronizasyonu
+Ajan, **ilk çalıştığı anda** aşağıyı gözeterek repo durumunu güncel tutmalıdır:
 
-```bash
-git fetch origin
-git checkout master  # ya da main
-git pull origin master
-git status
-```
+- Uzaktan (remote) değişiklikleri çekmeli (`fetch` / `pull`).
+- Çalışmakta olduğu dalı (`master` ya da `main`) güncel tutmalı.
+- `git status` / `git log` ile mevcut durum ve son commit'leri görmelidir.
 
-Bu sayede ajan, çalışmaya başlamadan önce en güncel kodu alır ve mevcut değişiklikleri görür.
+Bu adımların nasıl ve hangi sırda yürütüleceği, ajanın o anki durum ve ortamına (ör. dal adı,
+varsa yerel değişiklikler) göre karar verir.
 
-## İşlem Sonrası Git Güncelleme
-Her işlem (kod değişikliği, test, dokümantasyon vs.) **bittiğinde**, ajan şu adımları izler:
+## 2. İşlem Sonrası Git Güncelleme
+Her işlem (kod değişikliği, test, dokümantasyon, build, vs.) **bittiğinde** ajan şunları yapmalıdır:
 
-```bash
-git add -A
-git commit -m "<açıklayıcı commit mesajı>"
-git push origin master
-```
+- Tüm değişiklikleri sahneye almalı (`git add -A` ya da sadece ilgili dosyalar).
+- Commit oluşturmalı; mesajı **net, açıklayıcı ve öz** olmalı. Commit mesajı ajan tarafından
+  içerik ve bağlama göre dilediği gibi kaleme gelir — aşağıdaki yölledirici kuralları zorunlu
+  kılavuğudur:
+  - Mesaj değişikliğin ne yaptığını tarif etmeli.
+  - Gerekirse `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` footer'ı eklenir.
+- Commit'i uzak repoya itmeye çalışır (`git push`).
+- Push sırasında çakışma ya da hata oluşursa, ajan durumu çözmek için `git pull --rebase`
+  yapabilir ya da gerektiği takdirde manuel birleştirme yapar.
 
-Commit mesajı kuralları:
-- Net ve açıklayıcı olmalı.
+## 3. Commit Mesajı Kuralları
+- Net ve açıklayıcı olmalı (örn. `fix: ...`, `feat: ...`, `docs: ...`).
 - Değişikliğin ne yaptığını belirtmeli.
-- Gerekirse aşağıdaki co-author footer'ı eklenir:
+- Gerekirse `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` footer'ı eklenir.
 
-```
-Co-authored-by: CommandCodeBot <noreply@commandcode.ai>
-```
-
-## Genel Kurallar
-- Git durumunu her zaman kontrol edin (`git status`).
+## 4. Genel Kurallar
+- `git status` ve `git log` ile her zaman güncel durum kontrol edin.
 - Commit yapmadan önce kodu build edin ve test edin.
-- `git reset --hard` gibi yok edici işlemlerden kaçının.
-- Branch yerine doğrudan `main`/`master` branch'e commit edin.
+- `git reset --hard`, dosya silme gibi yok edici işlemlerden kaçının.
+- Branch yerine doğrudan `master`/`main` branch'e commit edin.
