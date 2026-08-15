@@ -7,8 +7,8 @@ Her ajan, **ilk çalıştığında** şu adımları izler:
 
 ```bash
 git fetch origin
-git checkout main   # ya da master
-git pull origin main
+git checkout master  # ya da main
+git pull origin master
 git status
 ```
 
@@ -20,7 +20,7 @@ Her işlem (kod değişikliği, test, dokümantasyon vs.) **bittiğinde**, ajan 
 ```bash
 git add -A
 git commit -m "<açıklayıcı commit mesajı>"
-git push origin main
+git push origin master
 ```
 
 Commit mesajı kuralları:
