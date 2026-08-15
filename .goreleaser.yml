@@ -1,0 +1,28 @@
+version: 2
+project_name: domainsearch
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: domainsearch
+    main: ./cmd/domainsearch
+    binary: domainsearch
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [zip]
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}.md5"
+
+release:
+  draft: false
+  prerelease: auto

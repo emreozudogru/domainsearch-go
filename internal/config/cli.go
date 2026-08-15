@@ -2,6 +2,7 @@ package config
 
 import (
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,11 @@ concurrently with an optional rate limit.`,
 	flags.IntVarP(&cfg.Workers, "workers", "w", 10, "number of concurrent workers")
 	flags.BoolVar(&cfg.NoProgress, "no-progress", false, "disable the progress bar on stderr")
 	flags.BoolVarP(&cfg.Verbose, "verbose", "v", false, "enable verbose logging on stderr")
+	flags.StringVar(&cfg.CachePath, "cache", "", "path to result cache file (enables caching/resume; empty disables)")
+	flags.DurationVar(&cfg.CacheTTL, "cache-ttl", 24*time.Hour, "cache entry freshness window")
+	flags.IntVar(&cfg.Retries, "retries", 2, "number of retries on a lookup timeout")
+	flags.DurationVar(&cfg.Timeout, "timeout", 15*time.Second, "per-lookup timeout")
+	flags.BoolVarP(&cfg.AvailableOnly, "available-only", "a", false, "only write available domains to output")
 	return cmd
 }
 

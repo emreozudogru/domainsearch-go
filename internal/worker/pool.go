@@ -10,24 +10,20 @@ import (
 	"ds_go/internal/checker"
 )
 
-// CheckFunc resolves whether a given domain is available. It is a parameter
-// so tests can substitute a fake implementation.
-type CheckFunc func(domain, tld string) checker.Result
-
 // Pool is a fixed-size pool of workers that check domains concurrently,
 // respecting a shared rate limiter.
 type Pool struct {
 	jobs      <-chan string
 	results   chan<- checker.Result
 	workers   int
-	check     CheckFunc
+	check     checker.CheckFunc
 	limiter   *rate.Limiter
 	waitGroup sync.WaitGroup
 }
 
-// New creates a Pool that reads words from jobs, checks each word appended
+// New creates a Pool that reads words from jobs, checking each word appended
 // with every TLD, and writes results to the results channel.
-func New(jobs <-chan string, results chan<- checker.Result, workers, ratePerSec int, check CheckFunc) *Pool {
+func New(jobs <-chan string, results chan<- checker.Result, workers, ratePerSec int, check checker.CheckFunc) *Pool {
 	if workers < 1 {
 		workers = 1
 	}
@@ -35,7 +31,8 @@ func New(jobs <-chan string, results chan<- checker.Result, workers, ratePerSec 
 		ratePerSec = 1
 	}
 	if check == nil {
-		check = checker.Check
+		def := checker.NewChecker(15*time.Second, 2, checker.DefaultLookup)
+		check = def.Check
 	}
 	return &Pool{
 		jobs:    jobs,

@@ -10,11 +10,13 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/schollz/progressbar/v3"
 
+	"ds_go/internal/cache"
 	"ds_go/internal/checker"
 	"ds_go/internal/config"
 	"ds_go/internal/output"
@@ -24,7 +26,7 @@ import (
 func main() {
 	cfg := &config.Config{}
 	cmd := config.NewRootCmd(cfg, run)
-	// Default logger writes only errors to stderr. run() reconfigures it when verbose.
+	// Default logger writes only errors to stderr; run() raises the level in verbose mode.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 
 	if err := cmd.Execute(); err != nil {
@@ -43,6 +45,9 @@ func run(cfg *config.Config) error {
 		"workers", cfg.Workers,
 		"rate", cfg.Rate,
 		"format", cfg.Format,
+		"cache", cfg.CachePath,
+		"timeout", cfg.Timeout,
+		"retries", cfg.Retries,
 	)
 
 	words, err := readWordlist(cfg.InputPath)
@@ -62,10 +67,27 @@ func run(cfg *config.Config) error {
 		cleanup()
 	}()
 
+	// Optional result cache (also provides resume across runs).
+	var store *cache.Store
+	if cfg.CachePath != "" {
+		store = cache.NewStore(cfg.CachePath, cfg.CacheTTL)
+		if err := store.Load(); err != nil {
+			slog.Warn("cache load failed; continuing without cache", "err", err)
+			store = nil
+		}
+	}
+
+	// Build the lookup checker with timeout and retries.
+	ch := checker.NewChecker(cfg.Timeout, cfg.Retries, checker.DefaultLookup)
+	check := checker.CheckFunc(ch.Check)
+	if store != nil {
+		check = cache.Wrap(check, store)
+	}
+
 	const bufSize = 256
 	jobs := make(chan string, bufSize)
 	results := make(chan checker.Result, bufSize)
-	p := worker.New(jobs, results, cfg.Workers, cfg.Rate, checker.Check)
+	p := worker.New(jobs, results, cfg.Workers, cfg.Rate, check)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -93,13 +115,20 @@ func run(cfg *config.Config) error {
 	}()
 
 	// Consumer: drain results into the output writer.
+	var stats stats
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for res := range results {
-			_ = out.Write(res)
-			slog.Debug("checked", "domain", res.Domain, "available", res.Available, "err", res.Err)
+			stats.record(res)
+			// available-only filter: skip emitting taken/error results.
+			if !(cfg.AvailableOnly && !res.Available) {
+				_ = out.Write(res)
+			}
+			if cfg.Verbose {
+				slog.Debug("checked", "domain", res.Domain, "available", res.Available, "err", res.Err)
+			}
 			if bar != nil {
 				_ = bar.Add(1)
 			}
@@ -111,8 +140,45 @@ func run(cfg *config.Config) error {
 	p.Wait() // workers finish, results channel closed
 	wg.Wait()
 
-	slog.Debug("done", "elapsed", time.Since(start), "checked", len(words)*len(cfg.Tlds))
+	if store != nil {
+		if err := store.Save(); err != nil {
+			slog.Warn("cache save failed", "err", err)
+		}
+	}
+
+	elapsed := time.Since(start)
+	slog.Debug("done", "elapsed", elapsed, "checked", stats.checked, "available", stats.available)
+	printSummary(stats, elapsed)
 	return nil
+}
+
+// stats tracks per-run counters.
+type stats struct {
+	checked   int64
+	available int64
+	taken     int64
+	failed    int64
+}
+
+func (s *stats) record(r checker.Result) {
+	atomic.AddInt64(&s.checked, 1)
+	if r.Err != nil {
+		atomic.AddInt64(&s.failed, 1)
+		return
+	}
+	if r.Available {
+		atomic.AddInt64(&s.available, 1)
+	} else {
+		atomic.AddInt64(&s.taken, 1)
+	}
+}
+
+// printSummary writes the run summary to stderr.
+func printSummary(s stats, elapsed time.Duration) {
+	fmt.Fprintf(os.Stderr,
+		"\nSummary: checked=%d  available=%d  taken=%d  errors=%d  in %s\n",
+		s.checked, s.available, s.taken, s.failed, elapsed.Round(time.Millisecond),
+	)
 }
 
 // readWordlist reads non-empty, trimmed lines from path.

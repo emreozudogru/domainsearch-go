@@ -53,15 +53,21 @@ print results to stdout.
 
 ### Flags
 
-| Flag          | Default              | Description                                                |
-|---------------|----------------------|------------------------------------------------------------|
-| `--input`     | `assets/wtzl.txt`    | Path to the wordlist file (one word per line).             |
-| `--tlds`      | `.us`                | Comma-separated list of TLDs, e.g. `.us,.com,.net`.       |
-| `--format`    | `text`               | Output format: `text`, `json`, or `csv`.                   |
-| `--output`    | (stdout)             | Output file path. If empty, writes to stdout.            |
-| `--rate`      | `5`                  | Maximum domain checks per second (rate limit).             |
-| `--workers`   | `10`                 | Number of concurrent worker goroutines.                    |
-| `--no-progress` | `false`            | Disable the progress indicator on stderr.                  |
+| Flag / Shorthand        | Default              | Description                                                |
+|-------------------------|----------------------|------------------------------------------------------------|
+| `-i, --input`           | `assets/wtzl.txt`    | Path to the wordlist file (one word per line).             |
+| `-t, --tlds`            | `.us`                | Comma-separated list of TLDs, e.g. `.us,.com,.net`.         |
+| `-f, --format`          | `text`               | Output format: `text`, `json`, or `csv`.                    |
+| `-o, --output`          | (stdout)             | Output file path. If empty, writes to stdout.               |
+| `-r, --rate`            | `5`                  | Maximum domain checks per second (rate limit).              |
+| `-w, --workers`         | `10`                 | Number of concurrent worker goroutines.                     |
+| `-v, --verbose`         | `false`              | Enable verbose logging on stderr.                           |
+| `--no-progress`         | `false`              | Disable the progress bar on stderr.                         |
+| `--cache`               | (none)               | Result cache file (enables caching and resume across runs). |
+| `--cache-ttl`           | `24h`                | Cache entry freshness window.                               |
+| `--timeout`             | `15s`                | Per-lookup timeout.                                         |
+| `--retries`             | `2`                  | Number of retries on a lookup timeout.                      |
+| `-a, --available-only`  | `false`              | Only write available domains to output.                     |
 
 ### Examples
 
@@ -81,7 +87,31 @@ Save JSON results to a file, no progress bar:
 Save CSV results with higher concurrency and a tighter rate limit:
 
 ```bash
-./bin/domainsearch --tlds .com --format csv --output results.csv --workers 20 --rate 10
+./bin/domainsearch -t .com -f csv -o results.csv -w 20 -r 10
+```
+
+Only list available domains (to a file, with a 20-second per-lookup timeout and
+2 retries on timeout):
+
+```bash
+./bin/domainsearch -t .us,.com,.net -a -f text -o available.txt --timeout 20s --retries 2
+```
+
+**Caching and resume** — persist results to a file so re-runs skip already-checked
+domains (great for long wordlists interrupted mid-run):
+
+```bash
+# First run: performs the lookups and writes the cache.
+./bin/domainsearch -t .us,.com -i words.txt --cache ~/.cache/domainsearch.jsonl --no-progress
+
+# Later runs: cached domains are reused; only new/entries re-check.
+./bin/domainsearch -t .us,.com -i words.txt --cache ~/.cache/domainsearch.jsonl --no-progress
+```
+
+A summary line is always printed to stderr, e.g.:
+
+```
+Summary: checked=2000  available=3  taken=1997  errors=0  in 12m34s
 ```
 
 ### Output Formats
@@ -137,9 +167,10 @@ domainsearch-go/
 
 ## Known Limitations
 
-- Lookups rely on the `available` package's own logic; errors are reported per domain but
-  not retried.
-- No persistence of "already checked" domains across runs.
+- Lookups rely on the `github.com/haccer/available` package's own logic; non-timeout
+  errors are reported per domain but not retried (only timeouts are retried).
+- The cache is a local file; it is not shared across machines.
+- Very large wordlists with many TLDs can still take a long time due to network latency.
 
 ## Development
 
@@ -165,6 +196,17 @@ Contributions are welcome. To develop locally:
 
 Continuous integration (`.github/workflows/ci.yml`) runs the build, vet, test, and lint
 steps on every push and pull request.
+
+### Releases
+
+Prebuilt cross-platform binaries can be produced with
+[GoReleaser](https://goreleaser.com/) using the included `.goreleaser.yml`:
+
+```bash
+goreleaser release --clean
+```
+
+Prebuilt binaries are also available on the GitHub Releases page.
 
 Follow the commit conventions described in [AGENTS.md](AGENTS.md). Commit directly to `master`
 (no feature branches) and push after each task.
