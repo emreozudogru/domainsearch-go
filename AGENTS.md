@@ -1,40 +1,47 @@
 # AGENTS.md
 
-Bu repo için otomatik çalışan ajanların (LLM) izlemesi gereken görev ve durum kuralları.
-**Ajan komutu kendisi karar vermeli.** Aşağıdaki noktalardaki *ne yapılmalı* kısımları göz önünde
-bulundurur, fakat tam olarak hangi shell komutları ve sırayla çalıştırılacağı tam anlamlı bir
-görevin çözümleyicisi (LLM) tarafından bu adımların uygun sırası ve biçimde yorumlanır.
+Guidelines for automated agents (LLMs) operating in this repository.
+**The agent itself decides** which commands to run and in what order. The sections below
+describe *what should be done*; a competent task solver interprets and sequences those steps
+based on the current state and environment (branch name, existing changes, etc.).
 
-## 1. Başlangıçta Git Senkronizasyonu
-Ajan, **ilk çalıştığı anda** aşağıyı gözeterek repo durumunu güncel tutmalıdır:
+## 1. Git Sync on Startup
+When an agent starts for the first time in a session, it should bring the repository up to
+date:
 
-- Uzaktan (remote) değişiklikleri çekmeli (`fetch` / `pull`).
-- Çalışmakta olduğu dalı (`master` ya da `main`) güncel tutmalı.
-- `git status` / `git log` ile mevcut durum ve son commit'leri görmelidir.
+- Fetch remote changes (`fetch` / `pull`).
+- Keep the working branch (`master` or `main`) current.
+- Inspect the current state with `git status` and `git log`.
 
-Bu adımların nasıl ve hangi sırda yürütüleceği, ajanın o anki durum ve ortamına (ör. dal adı,
-varsa yerel değişiklikler) göre karar verir.
+The exact commands and ordering are up to the agent based on what it observes in the
+environment.
 
-## 2. İşlem Sonrası Git Güncelleme
-Her işlem (kod değişikliği, test, dokümantasyon, build, vs.) **bittiğinde** ajan şunları yapmalıdır:
+## 2. Git Update After Every Task
+After every action (code change, test run, documentation update, build, etc.) the agent
+should:
 
-- Tüm değişiklikleri sahneye almalı (`git add -A` ya da sadece ilgili dosyalar).
-- Commit oluşturmalı; mesajı **net, açıklayıcı ve öz** olmalı. Commit mesajı ajan tarafından
-  içerik ve bağlama göre dilediği gibi kaleme gelir — aşağıdaki yölledirici kuralları zorunlu
-  kılavuğudur:
-  - Mesaj değişikliğin ne yaptığını tarif etmeli.
-  - Gerekirse `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` footer'ı eklenir.
-- Commit'i uzak repoya itmeye çalışır (`git push`).
-- Push sırasında çakışma ya da hata oluşursa, ajan durumu çözmek için `git pull --rebase`
-  yapabilir ya da gerektiği takdirde manuel birleştirme yapar.
+- Stage all changes (`git add -A` or the relevant subset of files).
+- Create a commit. The message should be **clear, concise, and descriptive** — the agent
+  writes it from scratch based on what it did. It must follow these rules:
+  - It should describe *what* the change does.
+  - It should use conventional prefixes where appropriate (e.g. `fix:`, `feat:`, `docs:`).
+  - When relevant, append the co-author trailer:
 
-## 3. Commit Mesajı Kuralları
-- Net ve açıklayıcı olmalı (örn. `fix: ...`, `feat: ...`, `docs: ...`).
-- Değişikliğin ne yaptığını belirtmeli.
-- Gerekirse `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` footer'ı eklenir.
+  ```
+  Co-authored-by: CommandCodeBot <noreply@commandcode.ai>
+  ```
+- Attempt to push the commit to the remote (`git push`).
+- If the push fails (conflicts, diverged remote, etc.) the agent should resolve it — e.g.
+  `git pull --rebase` — and retry.
 
-## 4. Genel Kurallar
-- `git status` ve `git log` ile her zaman güncel durum kontrol edin.
-- Commit yapmadan önce kodu build edin ve test edin.
-- `git reset --hard`, dosya silme gibi yok edici işlemlerden kaçının.
-- Branch yerine doğrudan `master`/`main` branch'e commit edin.
+## 3. Commit Message Convention
+- Start with a conventional prefix: `fix:`, `feat:`, `docs:`, `chore:`, `refactor:`, etc.
+- Describe the change concisely.
+- Add the `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` trailer when the change
+  is authored by an automated agent.
+
+## 4. General Rules
+- Always check `git status` and `git log` before making changes.
+- Build the code and run tests before committing.
+- Avoid destructive operations such as `git reset --hard` or deleting files.
+- Commit directly to `master` / `main` — no feature branches.
